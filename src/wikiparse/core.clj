@@ -170,36 +170,44 @@
          (callback ppart))
        (partition-all 100 pages)))
 
+(def categories-analyzer
+  {:analysis {:analyzer {:categories-analyzer {:type "pattern", :pattern ":::"}}}})
+
 (def page-mapping
   {
    :properties
-    {
-     :ns {:type :string :index :not_analyzed}
-     :redirect {:type :string :index :not_analyzed}
-     :title {
-             :type :multi_field
-             :fields
-             {
-              :title_snow {:type :string :analyzer :snowball}
-              :title_simple {:type :string :analyzer :simple}
-              :title_exact {:type :string :index :not_analyzed}}}
-     :redirects {
-             :type :multi_field
-             :fields
-             {
-              :redirects_snow {:type :string :analyzer :snowball}
-              :redirects_simple {:type :string :analyzer :simple}
-              :redirects_exact {:type :string :index :not_analyzed}}}
-     :body {
-             :type :multi_field
-             :fields
-             {
-              :body_snow {:type :string :analyzer :snowball}
-              :body_simple {:type :string :analyzer :simple}}}
-     :suggest {
-               :type :completion
-               :index_analyzer :simple
-               :search_analyzer :simple}}})
+   {
+    :ns {:type :string :index :not_analyzed}
+    :redirect {:type :string :index :not_analyzed}
+    :title {
+            :type :multi_field
+            :fields
+            {
+             :title_snow {:type :string :analyzer :snowball}
+             :title_simple {:type :string :analyzer :simple}
+             :title_exact {:type :string :index :not_analyzed}}}
+    :redirects {
+                :type :multi_field
+                :fields
+                {
+                 :redirects_snow {:type :string :analyzer :snowball}
+                 :redirects_simple {:type :string :analyzer :simple}
+                 :redirects_exact {:type :string :index :not_analyzed}}}
+    :body {
+           :type :multi_field
+           :fields
+           {
+            :body_snow {:type :string :analyzer :snowball}
+            :body_simple {:type :string :analyzer :simple}}}
+    :categories {
+                 :type :multi_field
+                 :fields
+                 {
+                  :categories_tokenized {:type :string :analyzer :categories-analyzer}}}
+    :suggest {
+              :type :completion
+              :index_analyzer :simple
+              :search_analyzer :simple}}})
 
 ;; Bootstrap + Run
 
@@ -209,7 +217,7 @@
     (println (format "Deleting index %s" name))
     (es-index/delete name)
     (println (format "Creating index %s" name))
-    (es-index/create name :mappings {:page page-mapping})))
+    (es-index/create name :mappings {:page page-mapping} :settings categories-analyzer)))
 
 (defn index-dump
   [rdr callback phase index-name]
@@ -249,12 +257,12 @@
   [& args]
   (let [[opts path] (parse-cmdline args)]
     (esr/connect! (:es opts)
-    (ensure-index (:index opts))
-    (let [counter (AtomicLong.)
-          callback (fn [pages] (println (format "@ %s pages" (.addAndGet counter (count pages)))))]
-      (doseq [phase [:full]]
-        (with-open [rdr (bz2-reader path)]
-          (println (str "Processing " phase))
-          (dorun (index-dump rdr callback phase (:index opts)))))
-            (println (format "Indexed %s pages" (.get counter))))
-    (System/exit 0))))
+                  (ensure-index (:index opts))
+                  (let [counter (AtomicLong.)
+                        callback (fn [pages] (println (format "@ %s pages" (.addAndGet counter (count pages)))))]
+                    (doseq [phase [:full]]
+                      (with-open [rdr (bz2-reader path)]
+                        (println (str "Processing " phase))
+                        (dorun (index-dump rdr callback phase (:index opts)))))
+                    (println (format "Indexed %s pages" (.get counter))))
+                  (System/exit 0))))
