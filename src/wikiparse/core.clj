@@ -28,12 +28,22 @@
   (fn [elems]
     (reduce (fn [m elem]
               (if-let [mapper ((:tag elem) mappers)]
-                (assoc m (:tag elem) (mapper elem))
+                (reduce #(assoc %1 (first %2) ((second %2) elem)) m (partition 2 mapper))
                 m))
             {}
             elems)))
 
 (def text-mapper (comp first :content))
+
+(def categories-mapper
+  (fn [text]
+    (clojure.string/join ":::"
+                         (map
+                          (comp #(clojure.string/replace % "|" "")
+                                clojure.string/trim second)
+                          (re-seq #"\[\[Category:(.+)\]\]"
+                                  (text-mapper text)))))
+  )
 
 (def int-mapper #(Integer/parseInt (text-mapper %)))
 
@@ -42,22 +52,32 @@
   (fn [{attrs :attrs}]
     (get attrs attr)))
 
-
-
 (def revision-mapper
   (comp
    (elem->map
-    {:text text-mapper
-     :timestamp text-mapper
-     :format (comp keyword text-mapper)})
+    {:text [:categories categories-mapper :text text-mapper]
+     :timestamp [:timestamp text-mapper]
+     :format [:format (comp keyword text-mapper)]})
    :content))
 
+;; original version
+(comment
+  (def revision-mapper
+    (comp
+     (elem->map
+      {:text text-mapper
+       :timestamp text-mapper
+       :format (comp keyword text-mapper)})
+     :content)))
+
+;; note - :redirect should not exist since pages with redirect tags are filtered
+;; out during filter-page-elems.
 (def page-mappers
-  {:title text-mapper
-   :ns int-mapper
-   :id int-mapper
-   :redirect (attr-mapper :title)
-   :revision revision-mapper})
+  {:title [:title text-mapper]
+   :ns [:ns int-mapper]
+   :id [:id int-mapper]
+   :redirect [:redirect (attr-mapper :title)]
+   :revision [:revision revision-mapper]})
 
 ;; Parse logic
 
