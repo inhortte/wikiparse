@@ -10,6 +10,9 @@
            (java.util.concurrent.atomic AtomicLong))
   (:gen-class))
 
+(def small-bz2 "./wikisample.xml.bz2")
+(def thurk-bz2 "./thurkwiki.xml.bz2")
+
 (defn bz2-reader
   "Returns a streaming Reader for the given compressed BZip2
   file. Use within (with-open)."
@@ -39,11 +42,11 @@
   (fn [{attrs :attrs}]
     (get attrs attr)))
 
-  
+
 
 (def revision-mapper
-  (comp 
-   (elem->map 
+  (comp
+   (elem->map
     {:text text-mapper
      :timestamp text-mapper
      :format (comp keyword text-mapper)})
@@ -67,10 +70,15 @@
   [wikimedia-elems]
   (filter (match-tag :page) wikimedia-elems))
 
+;; filter out all redirects.
+(defn nix-redirects
+  [wikimedia-elems]
+  (filter (comp not (partial some #(match-tag :redirect)) :content) wikimedia-elems))
+
 (defn xml->pages
   [parsed]
   (pmap (comp (elem->map page-mappers) :content)
-       (filter-page-elems (:content parsed))))
+        ((comp nix-redirects filter-page-elems) (:content parsed))))
 
 ;; Elasticsearch indexing
 
@@ -84,7 +92,7 @@
 (defn es-page-formatter-for
   "returns an fn that formats the page as a bulk action tuple for a given index"
   [index-name]
-  (fn 
+  (fn
     [{title :title redirect :redirect {text :text} :revision :as page}]
     ;; the target-title ensures that redirects are filed under the article they are redirects for
     (let [target-title (or redirect title)]
@@ -92,8 +100,8 @@
        {:script "if (is_redirect) {ctx._source.redirects += redirect};
                ctx._source.suggest.input += title;
                if (!is_redirect) { ctx._source.title = title; ctx._source.body = body};"
-        :params {:redirect title, :title title 
-                 :target_title target-title, :body text 
+        :params {:redirect title, :title title
+                 :target_title target-title, :body text
                  :is_redirect (boolean redirect)}
         :upsert {:title target-title
                  :redirects (if redirect [title] [])
@@ -129,21 +137,21 @@
      :redirect {:type :string :index :not_analyzed}
      :title {
              :type :multi_field
-             :fields 
+             :fields
              {
               :title_snow {:type :string :analyzer :snowball}
               :title_simple {:type :string :analyzer :simple}
               :title_exact {:type :string :index :not_analyzed}}}
      :redirects {
              :type :multi_field
-             :fields 
+             :fields
              {
               :redirects_snow {:type :string :analyzer :snowball}
               :redirects_simple {:type :string :analyzer :simple}
               :redirects_exact {:type :string :index :not_analyzed}}}
      :body {
              :type :multi_field
-             :fields 
+             :fields
              {
               :body_snow {:type :string :analyzer :snowball}
               :body_simple {:type :string :analyzer :simple}}}
@@ -167,9 +175,9 @@
   ;; Get a reader for the bz2 file
   (-> rdr
       ;; Return a data.xml lazy parse-seq
-      (xml/parse)       
+      (xml/parse)
       ;; turn the seq of elements into a seq of maps
-      (xml->pages)      
+      (xml->pages)
       ;; Filter only ns 0 pages (only include 'normal' wikipedia articles)
       ;; Also, indicate whether we're processing redirects or full articles
       ;; in this pass. Redirects are indexed first, as re-tokenizing the full article
@@ -177,7 +185,7 @@
       ;; update
       (filter-pages phase)
       ;; re-map fields for elasticsearch
-      (es-format-pages index-name) 
+      (es-format-pages index-name)
       ;; send the fully formatted fields to elasticsearch
       (index-pages callback)))
 
