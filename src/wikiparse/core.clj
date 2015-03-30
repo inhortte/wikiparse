@@ -28,12 +28,22 @@
   (fn [elems]
     (reduce (fn [m elem]
               (if-let [mapper ((:tag elem) mappers)]
-                (assoc m (:tag elem) (mapper elem))
+                (reduce #(assoc %1 (first %2) ((second %2) elem)) m (partition 2 mapper))
                 m))
             {}
             elems)))
 
 (def text-mapper (comp first :content))
+
+(def categories-mapper
+  (fn [text]
+    (clojure.string/join ":::"
+                         (map
+                          (comp #(clojure.string/replace % "|" "")
+                                clojure.string/trim second)
+                          (re-seq #"\[\[Category:(.+)\]\]"
+                                  (text-mapper text)))))
+  )
 
 (def int-mapper #(Integer/parseInt (text-mapper %)))
 
@@ -42,22 +52,32 @@
   (fn [{attrs :attrs}]
     (get attrs attr)))
 
-
-
 (def revision-mapper
   (comp
    (elem->map
-    {:text text-mapper
-     :timestamp text-mapper
-     :format (comp keyword text-mapper)})
+    {:text [:categories categories-mapper :text text-mapper]
+     :timestamp [:timestamp text-mapper]
+     :format [:format (comp keyword text-mapper)]})
    :content))
 
+;; original version
+(comment
+  (def revision-mapper
+    (comp
+     (elem->map
+      {:text text-mapper
+       :timestamp text-mapper
+       :format (comp keyword text-mapper)})
+     :content)))
+
+;; note - :redirect should not exist since pages with redirect tags are filtered
+;; out during filter-page-elems.
 (def page-mappers
-  {:title text-mapper
-   :ns int-mapper
-   :id int-mapper
-   :redirect (attr-mapper :title)
-   :revision revision-mapper})
+  {:title [:title text-mapper]
+   :ns [:ns int-mapper]
+   :id [:id int-mapper]
+   :redirect [:redirect (attr-mapper :title)]
+   :revision [:revision revision-mapper]})
 
 ;; Parse logic
 
@@ -66,19 +86,36 @@
   [tag-name]
   #(= tag-name (:tag %)))
 
+;; Plus filter out redirects - Is it possible to do this in one operation?
+(comment
+  (defn filter-page-elems
+    [wikimedia-elems]
+    (filter (comp not (partial some (match-tag :redirect)) :content) (filter (match-tag :page) wikimedia-elems))))
+
 (defn filter-page-elems
   [wikimedia-elems]
-  (filter (match-tag :page) wikimedia-elems))
+  (reduce (fn [appropriate-elems to-be-scrutinized]
+            (if (and ((match-tag :page) to-be-scrutinized)
+                     ((comp not (partial some (match-tag :redirect)) :content) to-be-scrutinized))
+              (conj appropriate-elems to-be-scrutinized)
+              appropriate-elems))
+          [] wikimedia-elems))
 
-;; filter out all redirects.
-(defn nix-redirects
-  [wikimedia-elems]
-  (filter (comp not (partial some #(match-tag :redirect)) :content) wikimedia-elems))
+(comment
+  (defn nix-redirects
+    [wikimedia-elems]
+    (filter (comp not (partial some #(match-tag :redirect)) :content) wikimedia-elems)))
+
+(defn isolate-categories
+  [page]
+  (let [text (:content ((match-tag :text) (:content ((match-tag :revison) (:content page)))))]
+    )
+  )
 
 (defn xml->pages
   [parsed]
   (pmap (comp (elem->map page-mappers) :content)
-        ((comp nix-redirects filter-page-elems) (:content parsed))))
+        (filter-page-elems (:content parsed))))
 
 ;; Elasticsearch indexing
 
