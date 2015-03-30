@@ -30,22 +30,33 @@
               (if-let [mapper ((:tag elem) mappers)]
                 (reduce #(assoc %1 (first %2) ((second %2) elem)) m (partition 2 mapper))
                 m))
-            {}
-            elems)))
+            {} elems)))
 
-(def text-mapper (comp first :content))
+;; modified from the original to expunge reference links, categories, etc, leaving the essential text.
+(defn text-mapper
+  [revision]
+  (-> revision
+      :content
+      first
+      (string/replace #"\{\{.+\}\}" "")
+      (string/replace #"\[\[.+\]\]" "")
+      (string/replace #"<ref.*>.+</ref>" "")
+      (string/replace #"<.*ref>" "")
+      (string/replace #"==.+==" "")))
 
-(def categories-mapper
-  (fn [text]
-    (clojure.string/join ":::"
-                         (map
-                          (comp #(clojure.string/replace % "|" "")
-                                clojure.string/trim second)
-                          (re-seq #"\[\[Category:(.+)\]\]"
-                                  (text-mapper text)))))
+(def content-mapper (comp first :content))
+
+(defn categories-mapper
+  [revision]
+  (clojure.string/join ":::"
+                       (map
+                        (comp #(clojure.string/replace % "|" "")
+                              clojure.string/trim second)
+                        (re-seq #"\[\[Category:(.+)\]\]"
+                                ((comp first :content) revision))))
   )
 
-(def int-mapper #(Integer/parseInt (text-mapper %)))
+(def int-mapper #(Integer/parseInt (content-mapper %)))
 
 (defn attr-mapper
   [attr]
@@ -56,24 +67,16 @@
   (comp
    (elem->map
     {:text [:categories categories-mapper :text text-mapper]
-     :timestamp [:timestamp text-mapper]
-     :format [:format (comp keyword text-mapper)]})
+     :timestamp [:timestamp content-mapper]
+     :format [:format (comp keyword content-mapper)]})
    :content))
-
-;; original version
-(comment
-  (def revision-mapper
-    (comp
-     (elem->map
-      {:text text-mapper
-       :timestamp text-mapper
-       :format (comp keyword text-mapper)})
-     :content)))
 
 ;; note - :redirect should not exist since pages with redirect tags are filtered
 ;; out during filter-page-elems.
+;; {:parsed-key [:indended-key extraction-function :intended-key extraction-function ....],
+;; to be reduced with a (partition 2 ...)
 (def page-mappers
-  {:title [:title text-mapper]
+  {:title [:title content-mapper]
    :ns [:ns int-mapper]
    :id [:id int-mapper]
    :redirect [:redirect (attr-mapper :title)]
