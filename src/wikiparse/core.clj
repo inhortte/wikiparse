@@ -133,7 +133,7 @@
   "returns an fn that formats the page as a bulk action tuple for a given index"
   [index-name]
   (fn
-    [{title :title redirect :redirect {text :text} :revision :as page}]
+    [{title :title redirect :redirect {text :text categories :categories} :revision :as page}]
     ;; the target-title ensures that redirects are filed under the article they are redirects for
     (let [target-title (or redirect title)]
       [{:update {:_id (string/lower-case target-title) :_index index-name :_type :page}}
@@ -146,7 +146,8 @@
         :upsert {:title target-title
                  :redirects (if redirect [title] [])
                  :suggest {:input [title] :output target-title}
-                 :body (when (not redirect) text)}}])))
+                 :body (when (not redirect) text)
+                 :categories (when (not redirect) categories)}}])))
 
 (defn es-format-pages
   [pages index-name]
@@ -242,6 +243,8 @@
       (System/exit 1))
     [opts (first args)]))
 
+;; (doseq [phase [:redirects :full]] ... becomes simply [phase [:full]] because
+;; redirects are eliminated early on.
 (defn -main
   [& args]
   (let [[opts path] (parse-cmdline args)]
@@ -249,7 +252,7 @@
     (ensure-index (:index opts))
     (let [counter (AtomicLong.)
           callback (fn [pages] (println (format "@ %s pages" (.addAndGet counter (count pages)))))]
-      (doseq [phase [:redirects :full]]
+      (doseq [phase [:full]]
         (with-open [rdr (bz2-reader path)]
           (println (str "Processing " phase))
           (dorun (index-dump rdr callback phase (:index opts)))))
