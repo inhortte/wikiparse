@@ -66,19 +66,36 @@
   [tag-name]
   #(= tag-name (:tag %)))
 
+;; Plus filter out redirects - Is it possible to do this in one operation?
+(comment
+  (defn filter-page-elems
+    [wikimedia-elems]
+    (filter (comp not (partial some (match-tag :redirect)) :content) (filter (match-tag :page) wikimedia-elems))))
+
 (defn filter-page-elems
   [wikimedia-elems]
-  (filter (match-tag :page) wikimedia-elems))
+  (reduce (fn [appropriate-elems to-be-scrutinized]
+            (if (and ((match-tag :page) to-be-scrutinized)
+                     ((comp not (partial some (match-tag :redirect)) :content) to-be-scrutinized))
+              (conj appropriate-elems to-be-scrutinized)
+              appropriate-elems))
+          [] wikimedia-elems))
 
-;; filter out all redirects.
-(defn nix-redirects
-  [wikimedia-elems]
-  (filter (comp not (partial some #(match-tag :redirect)) :content) wikimedia-elems))
+(comment
+  (defn nix-redirects
+    [wikimedia-elems]
+    (filter (comp not (partial some #(match-tag :redirect)) :content) wikimedia-elems)))
+
+(defn isolate-categories
+  [page]
+  (let [text (:content ((match-tag :text) (:content ((match-tag :revison) (:content page)))))]
+    )
+  )
 
 (defn xml->pages
   [parsed]
   (pmap (comp (elem->map page-mappers) :content)
-        ((comp nix-redirects filter-page-elems) (:content parsed))))
+        (filter-page-elems (:content parsed))))
 
 ;; Elasticsearch indexing
 
