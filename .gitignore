@@ -18,3 +18,4 @@ docs/*
 *.bz2
 .lein*
 .nrepl*
+tmp/*
